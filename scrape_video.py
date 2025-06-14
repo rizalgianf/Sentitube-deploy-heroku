@@ -15,7 +15,7 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 # Fungsi untuk download model FastText dari Google Drive
 def download_fasttext_model():
-    url = "https://drive.google.com/uc?id=ID_FILE_MODEL"  # Ganti dengan ID file Google Drive Anda
+    url = "https://drive.google.com/uc?id=1GLS6pDjCiHgzHsR9ncM4Nz39_elYdCAu"
     output = "fasttext_model.bin"
     if not os.path.exists(output):
         print("Downloading FastText model from Google Drive...")
