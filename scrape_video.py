@@ -7,10 +7,24 @@ import numpy as np
 import os
 import re
 from flask_cors import CORS
+import gdown
 
 # Load environment variables from .env file
 load_dotenv()
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+
+# Fungsi untuk download model FastText dari Google Drive
+def download_fasttext_model():
+    url = "https://drive.google.com/uc?id=ID_FILE_MODEL"  # Ganti dengan ID file Google Drive Anda
+    output = "fasttext_model.bin"
+    if not os.path.exists(output):
+        print("Downloading FastText model from Google Drive...")
+        gdown.download(url, output, quiet=False)
+    else:
+        print("FastText model already exists.")
+
+# Download model sebelum load
+download_fasttext_model()
 
 # Load FastText dan LSTM model
 FT_MODEL_PATH = "fasttext_model.bin"      # ganti sesuai nama file fasttext-mu
