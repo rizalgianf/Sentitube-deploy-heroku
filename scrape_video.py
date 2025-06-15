@@ -16,14 +16,24 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 FT_MODEL_PATH = "model_kecil.bin"     # menggunakan model lokal yang lebih kecil
 LSTM_MODEL_PATH = "lstm_model.h5"      # model LSTM
 
-# Load FastText dan LSTM model
-print(f"Loading FastText model from {FT_MODEL_PATH}...")
-ft_model = fasttext.load_model(FT_MODEL_PATH)
-print("FastText model loaded successfully!")
+# Inisialisasi model global tapi akan dimuat saat dibutuhkan
+ft_model = None
+lstm_model = None
 
-print(f"Loading LSTM model from {LSTM_MODEL_PATH}...")
-lstm_model = load_model(LSTM_MODEL_PATH)
-print("LSTM model loaded successfully!")
+# Fungsi untuk load model saat dibutuhkan (lazy loading)
+def load_models():
+    global ft_model, lstm_model
+    
+    # Load hanya jika belum dimuat
+    if ft_model is None:
+        print(f"Loading FastText model from {FT_MODEL_PATH}...")
+        ft_model = fasttext.load_model(FT_MODEL_PATH)
+        print("FastText model loaded successfully!")
+        
+    if lstm_model is None:
+        print(f"Loading LSTM model from {LSTM_MODEL_PATH}...")
+        lstm_model = load_model(LSTM_MODEL_PATH)
+        print("LSTM model loaded successfully!")
 
 LABELS = ["negatif", "netral", "positif"]  # urutkan sesuai label encoder training
 
@@ -48,19 +58,30 @@ def clean_text(text):
     text = text.replace("\n", " ")                      # Hapus newline
     return text.strip()
 
-def get_replies(youtube, parent_id, video_id):
+def get_replies(youtube, parent_id, video_id, comment_count, max_comments):
+    """
+    Mengambil balasan komentar dengan batasan jumlah total komentar
+    """
     replies = []
     next_page_token = None
     while True:
+        # Hentikan jika sudah mencapai batas komentar
+        if comment_count >= max_comments:
+            break
+            
         reply_request = youtube.comments().list(
             part="snippet",
             parentId=parent_id,
             textFormat="plainText",
-            maxResults=100,
-            pageToken=next_page_token
+            maxResults=100
         )
         reply_response = reply_request.execute()
+        
         for item in reply_response.get('items', []):
+            # Hentikan jika sudah mencapai batas komentar
+            if comment_count >= max_comments:
+                break
+                
             comment = item['snippet']
             replies.append({
                 'Timestamp': comment['publishedAt'],
@@ -70,15 +91,27 @@ def get_replies(youtube, parent_id, video_id):
                 'Cleaned': clean_text(comment['textDisplay']),
                 'Date': comment.get('updatedAt', comment['publishedAt'])
             })
+            comment_count += 1
+            
         next_page_token = reply_response.get('nextPageToken')
         if not next_page_token:
             break
-    return replies
+            
+    return replies, comment_count
 
-def get_comments_for_video(youtube, video_id):
+def get_comments_for_video(youtube, video_id, max_comments=4500):
+    """
+    Mengambil komentar video dengan batasan jumlah maksimum
+    """
     all_comments = []
+    comment_count = 0
     next_page_token = None
+    
     while True:
+        # Hentikan jika sudah mencapai batas komentar
+        if comment_count >= max_comments:
+            break
+            
         comment_request = youtube.commentThreads().list(
             part="snippet",
             videoId=video_id,
@@ -87,7 +120,12 @@ def get_comments_for_video(youtube, video_id):
             maxResults=100
         )
         comment_response = comment_request.execute()
+        
         for item in comment_response.get('items', []):
+            # Hentikan jika sudah mencapai batas komentar
+            if comment_count >= max_comments:
+                break
+                
             top_comment = item['snippet']['topLevelComment']['snippet']
             all_comments.append({
                 'Timestamp': top_comment['publishedAt'],
@@ -97,11 +135,23 @@ def get_comments_for_video(youtube, video_id):
                 'Cleaned': clean_text(top_comment['textDisplay']),
                 'Date': top_comment.get('updatedAt', top_comment['publishedAt'])
             })
-            if item['snippet']['totalReplyCount'] > 0:
-                all_comments.extend(get_replies(youtube, item['snippet']['topLevelComment']['id'], video_id))
+            comment_count += 1
+            
+            # Ambil balasan jika ada dan belum mencapai batas
+            if item['snippet']['totalReplyCount'] > 0 and comment_count < max_comments:
+                replies, comment_count = get_replies(
+                    youtube, 
+                    item['snippet']['topLevelComment']['id'], 
+                    video_id, 
+                    comment_count, 
+                    max_comments
+                )
+                all_comments.extend(replies)
+                
         next_page_token = comment_response.get('nextPageToken')
         if not next_page_token:
             break
+            
     # Hapus komentar yang hasil clean-nya kosong
     all_comments = [c for c in all_comments if c['Cleaned'].strip()]
     return all_comments
@@ -124,7 +174,7 @@ def get_video_details(youtube, video_id):
         'published_at': info['snippet']['publishedAt'],
         'view_count': info['statistics'].get('viewCount'),
         'like_count': info['statistics'].get('likeCount'),
-        'comment_count': info['statistics'].get('commentCount'),
+        'comment_count': info['statistics'].get('commentCount'),  # Tetap menampilkan jumlah komentar asli
         'tags': info['snippet'].get('tags', []),
         'category_id': info['snippet'].get('categoryId'),
         'privacy_status': info['status']['privacyStatus'],
@@ -149,21 +199,29 @@ def scrape_comments():
     try:
         youtube = build('youtube', 'v3', developerKey=YOUTUBE_API_KEY)
         video_details = get_video_details(youtube, video_id)
-        all_comments = get_comments_for_video(youtube, video_id)
+        all_comments = get_comments_for_video(youtube, video_id, max_comments=4500)  # Batasi ke 4500 komentar
 
         if not all_comments:
             return jsonify({'error': 'No comments found'}), 404
 
+        # Load model ketika dibutuhkan
+        load_models()
+        
         # Prediksi sentimen
         cleaned_texts = [c['Cleaned'] for c in all_comments]
         sentiments = predict_sentiment_lstm(cleaned_texts)
         for c, s in zip(all_comments, sentiments):
             c['Sentiment'] = s
 
-        return jsonify({
+        # Tambahkan info jumlah komentar yang diambil vs total
+        result = {
             'video_details': video_details,
-            'comments': all_comments
-        })
+            'comments': all_comments,
+            'comments_fetched': len(all_comments),
+            'total_comments': video_details.get('comment_count')
+        }
+        
+        return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
