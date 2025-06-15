@@ -7,30 +7,23 @@ import numpy as np
 import os
 import re
 from flask_cors import CORS
-import gdown
 
 # Load environment variables from .env file
 load_dotenv()
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-# Fungsi untuk download model FastText dari Google Drive
-def download_fasttext_model():
-    url = "https://drive.google.com/uc?id=1GLS6pDjCiHgzHsR9ncM4Nz39_elYdCAu"
-    output = "fasttext_model.bin"
-    if not os.path.exists(output):
-        print("Downloading FastText model from Google Drive...")
-        gdown.download(url, output, quiet=False)
-    else:
-        print("FastText model already exists.")
-
-# Download model sebelum load
-download_fasttext_model()
+# Path model lokal
+FT_MODEL_PATH = "model_kecil.bin"     # menggunakan model lokal yang lebih kecil
+LSTM_MODEL_PATH = "lstm_model.h5"      # model LSTM
 
 # Load FastText dan LSTM model
-FT_MODEL_PATH = "fasttext_model.bin"      # ganti sesuai nama file fasttext-mu
-LSTM_MODEL_PATH = "lstm_model.h5"         # ganti sesuai nama file lstm-mu
+print(f"Loading FastText model from {FT_MODEL_PATH}...")
 ft_model = fasttext.load_model(FT_MODEL_PATH)
+print("FastText model loaded successfully!")
+
+print(f"Loading LSTM model from {LSTM_MODEL_PATH}...")
 lstm_model = load_model(LSTM_MODEL_PATH)
+print("LSTM model loaded successfully!")
 
 LABELS = ["negatif", "netral", "positif"]  # urutkan sesuai label encoder training
 
